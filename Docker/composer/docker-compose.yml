@@ -1,0 +1,231 @@
+version: "3.7"
+
+services:
+  #
+  # Tested running well
+  # Incoming connection from teamspeak service
+  #
+  mariadb:
+    image: mariadb
+    container_name: mariadb
+    volumes:
+      - mariadb:/var/lib/mysql
+    environment:
+      MYSQL_DATABASE: $MARIADB_DATABASE
+      MYSQL_ROOT_PASSWORD: $MARIADB_ROOT_PASSWORD
+    restart: always
+
+  #
+  # Tested running well
+  # Incoming connection from nextcloud and mattermost services
+  #
+  postgres:
+    image: mattermost/mattermost-prod-db:latest
+    container_name: postgres
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_MULTIPLE_DATABASES: $MM_DBNAME,$NX_DBNAME
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+    restart: always
+
+  freeipa:
+    image: freeipa/freeipa-server:latest
+    container_name: freeipa
+    ports:
+      - "53:53/udp"
+      - "53:53"
+      - "80:80"
+      - "443:443"
+      - "389:389"
+      - "636:636"
+      - "88:88"
+      - "464:464"
+      - "88:88/udp"
+      - "464:464/udp"
+      - "123:123/udp"
+    volumes:
+      - /var/lib/ipa-data:/data:Z
+
+  mail:
+    image: tvial/docker-mailserver:latest
+    hostname: ${HOSTNAME}
+    domainname: ${DOMAINNAME}
+    container_name: mailserver
+    ports:
+      - "25:25"
+      - "143:143"
+      - "587:587"
+      - "993:993"
+    volumes:
+      - maildata:/var/mail
+      - mailstate:/var/mail-state
+      - maillogs:/var/log/mail
+      - ./config/:/tmp/docker-mailserver/
+    env_file:
+      - mailserver/.env
+      - mailserver/env-mailserver
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+    restart: always
+
+  #
+  # Running, but not fully tested
+  # Need https connection to test
+  #
+  ecodms:
+    image: ecodms/allinone-18.09:latest
+    container_name: ecodms
+    ports:
+      - "17001:17001"
+      - "17004:8080"
+      - "17005:8180"
+    volumes:
+      - /volume2/ecodmsData:/srv/data
+      - /volume1/ecoDMS/scaninput:/srv/scaninput
+      - /volume1/ecoDMS/backup:/srv/backup
+      - /volume1/ecoDMS/restore:/srv/restore
+    restart: always
+
+  #
+  # Tested running well
+  # Need to think about changing config.php
+  #
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud
+    ports:
+      - "8080:80"
+    volumes:
+      - nextcloud:/var/www/html
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: $NX_DBNAME
+      POSTGRES_USER: $NX_DBUSER
+      POSTGRES_PASSWORD: $_DBPASSWORD
+      NEXTCLOUD_ADMIN_PASSWORD: admin #$NEXTCLOUD_ADMIN_PASSWORD
+      NEXTCLOUD_ADMIN_USER: admin #$NEXTCLOUD_ADMIN_USER
+    links:
+      - postgres
+    depends_on:
+      - postgres
+    restart: always
+
+  #
+  # Running, turnadmin return a responses
+  # Need to test against real server connection
+  #
+  coturn:
+    image: instrumentisto/coturn:latest
+    container_name: coturn
+    volumes:
+      - ./my.conf:/etc/coturn/turnserver.conf
+    network_mode: "host"
+    restart: always
+
+  #
+  # Tested running well
+  # Embed the API into nextcloud service
+  #
+  documentserver:
+    image: onlyoffice/documentserver:latest
+    container_name: documentserver
+    ports:
+      - "8081:80"
+    volumes:
+      - /app/onlyoffice/DocumentServer/data:/var/www/onlyoffice/Data
+      - /app/onlyoffice/DocumentServer/logs:/var/log/onlyoffice
+    restart: always
+
+  #
+  # Tested running well
+  # Embed the API into nextcloud service
+  #
+  draw-io:
+    image: fjudith/draw.io:latest
+    container_name: draw-io
+    ports:
+      - "8082:8080"
+      - "8443:8443"
+    restart: always
+
+  #
+  # Tested running well
+  # Sharing postgres service with nextcloud
+  #
+  mattermost:
+    image: mattermost/mattermost-prod-app:latest
+    container_name: mattermost
+    ports:
+      - "8082:8000"
+    volumes:
+      - ./volumes/app/mattermost/config:/mattermost/config:rw
+      - ./volumes/app/mattermost/data:/mattermost/data:rw
+      - ./volumes/app/mattermost/logs:/mattermost/logs:rw
+      - ./volumes/app/mattermost/plugins:/mattermost/plugins:rw
+      - ./volumes/app/mattermost/client-plugins:/mattermost/client/plugins:rw
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      MM_DBNAME: $MM_DBNAME
+      MM_USERNAME: $MM_USERNAME
+      MM_PASSWORD: $MM_PASSWORD
+      DB_HOST: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://$MM_USERNAME:$MM_PASSWORD@postgres/$MM_DBNAME?sslmode=disable&connect_timeout=10
+    links:
+      - postgres
+    depends_on:
+      - postgres
+    restart: always
+
+  #
+  # Tested running well
+  # Incoming connection from teamspeak client
+  #
+  teamspeak:
+    image: teamspeak:latest
+    container_name: teamspeak
+    ports:
+      - "9987:9987/udp"
+      - "10011:10011"
+      - "30033:30033"
+    environment:
+      TS3SERVER_DB_PLUGIN: ts3db_mariadb
+      TS3SERVER_DB_SQLCREATEPATH: create_mariadb
+      TS3SERVER_DB_HOST: mariadb
+      TS3SERVER_DB_USER: root
+      TS3SERVER_DB_PASSWORD: $MARIADB_ROOT_PASSWORD
+      TS3SERVER_DB_NAME: $MARIADB_DATABASE
+      TS3SERVER_DB_WAITUNTILREADY: 30
+      TS3SERVER_LICENSE: accept
+    links:
+      - mariadb
+    depends_on:
+      - mariadb
+    restart: always
+
+  #
+  # Tested running well
+  #
+  portainer:
+    image: portainer/portainer
+    container_name: portainer
+    ports:
+      - "9000:9000"
+    volumes:
+      - /portainer/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+
+volumes:
+  maildata:
+    driver: local
+  mailstate:
+    driver: local
+  maillogs:
+    driver: local
+  mariadb:
+  postgres:
+  nextcloud:
